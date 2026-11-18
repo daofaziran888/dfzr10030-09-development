@@ -9,6 +9,7 @@ from fastapi.responses import StreamingResponse
 
 from app.schemas import ActionPayload, ActionResult, EntryPayload, PageResult
 from app.services.log_viewer import LogViewerService
+from app.services.rpa_result import service as rpa_result_service
 
 router = APIRouter(prefix="/api/log_viewer", tags=["采集日志"])
 
@@ -32,13 +33,45 @@ def list_entries(
     request: Request,
     keyword: str | None = Query(default=None, description="按日志编号检索"),
     status: str | None = Query(default=None, description="未处理、处理中、已处理、已忽略"),
+    batch_no: str | None = Query(default=None, description="按RPA执行批次回查关联任务日志"),
     page: int = Query(default=1, ge=1),
     size: int = Query(default=20, ge=1, le=200),
 ) -> PageResult[dict]:
-    """按页面字段、日志编号关键字与状态过滤采集日志列表。"""
+    """按页面字段、日志编号关键字、执行批次与状态过滤采集日志列表。"""
     items, total = service.list_entries(
-        filters=query_filters(request), keyword=keyword, status=status, page=page, size=size)
+        filters=query_filters(request), keyword=keyword, status=status,
+        batch_no=batch_no, page=page, size=size)
     return PageResult(items=items, total=total, page=page, size=size)
+
+
+@router.get("/result-packages/pending")
+def result_package_pending() -> dict:
+    """采集日志服务读取结果包待处理清单（由同步接口落库）。"""
+    return {"items": rpa_result_service.pending_list()}
+
+
+@router.post("/result-packages/sync")
+def sync_result_packages(task_id: int | None = Query(default=None)) -> dict:
+    """采集日志服务同步读取RPA执行结果包及失败动作清单并落到待处理清单。"""
+    return rpa_result_service.sync_to_pending(task_id=task_id)
+
+
+@router.get("/result-packages/{package_id}/check")
+def check_result_package(package_id: str) -> dict:
+    """另一个入口：采集日志服务读取结果包并返回核对状态。"""
+    result = rpa_result_service.check_package(package_id)
+    if not result["ok"]:
+        raise HTTPException(status_code=404, detail=result["message"])
+    return result
+
+
+@router.post("/result-packages/{package_id}/consume")
+def consume_result_package(package_id: str) -> dict:
+    """采集日志服务消费结果包及失败动作清单，差异写回RPA任务并生成关联任务日志。"""
+    result = rpa_result_service.consume_package(package_id)
+    if not result["ok"]:
+        raise HTTPException(status_code=409, detail=result["message"])
+    return result
 
 
 @router.get("/export")
@@ -46,10 +79,12 @@ def export_entries(
     request: Request,
     keyword: str | None = Query(default=None),
     status: str | None = Query(default=None),
+    batch_no: str | None = Query(default=None),
 ) -> StreamingResponse:
     """下载当前筛选条件下的 UTF-8 CSV；必须声明在 /{entry_id} 之前。"""
     items, _ = service.list_entries(
-        filters=query_filters(request), keyword=keyword, status=status, page=1, size=1000000)
+        filters=query_filters(request), keyword=keyword, status=status,
+        batch_no=batch_no, page=1, size=1000000)
     output = io.StringIO()
     output.write("\ufeff")
     writer = csv.writer(output, lineterminator="\n")

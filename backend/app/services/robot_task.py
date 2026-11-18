@@ -4,6 +4,7 @@ from __future__ import annotations
 from datetime import date, timedelta
 from typing import Any
 
+from app.services.rpa_result import service as rpa_result_service
 from app.store import store
 
 MODULE = "robot_task"
@@ -54,7 +55,27 @@ class RobotTaskService:
         if action not in ACTION_RULES:
             return None, f"动作「{action}」不属于RPA任务编排可执行范围"
         target = ACTION_RULES[action]
+        if action == "开始执行":
+            # 并发边界：同一任务在途执行时拒绝重复启动
+            batch_no = str(entry.get("执行批次") or f"B-{entry_id}")
+            lock = rpa_result_service.start_execution(entry_id, batch_no)
+            if not lock["ok"]:
+                return None, lock["message"]
+        elif entry.get("status") == "执行中":
+            # 离开执行中即释放任务级执行锁
+            rpa_result_service.finish_execution(entry_id)
         entry["status"] = target
         entry["pending"] = target != STATUS_ORDER[-1]
         entry["abnormal"] = action in NEGATIVE_ACTIONS
         return entry, f"RPA任务已{action}"
+
+    def recover_interrupted(self) -> tuple[dict[str, Any] | None, str]:
+        """并发恢复：同一时刻只放行一个中断任务继续，重复恢复会被拒绝。"""
+        result = rpa_result_service.recover_one()
+        if not result["ok"]:
+            return None, result["message"]
+        entry = store.find(MODULE, int(result["task_id"]))
+        if entry is not None:
+            entry["status"] = "执行中"
+            entry["pending"] = True
+        return entry, f"任务 {result['task_id']} 已恢复执行（恢复令牌 {result['resume_token']}）"

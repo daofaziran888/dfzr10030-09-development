@@ -23,6 +23,10 @@
         <span>{{ field }}</span>
         <input v-model="filters[field]" :data-testid="`filter-${field}`" :placeholder="`按${field}检索`" />
       </label>
+      <label class="filter-item">
+        <span>执行批次回查</span>
+        <input v-model="batchNo" data-testid="filter-batch-no" placeholder="按RPA执行批次回查" />
+      </label>
       <button class="btn" data-testid="query" type="submit">查询</button>
       <button class="btn ghost" data-testid="reset" type="button" @click="resetFilters">重置条件</button>
     </form>
@@ -96,6 +100,7 @@ const rows = ref<Row[]>([])
 const total = ref(0)
 const errorMessage = ref('')
 const filters = ref<Record<string, string>>({})
+const batchNo = ref('')
 const filterFields = columns.slice(0, 3)
 const showCreate = ref(false)
 const creating = ref(false)
@@ -108,6 +113,7 @@ const stats = computed(() => [
 
 function resetFilters() {
   filters.value = {}
+  batchNo.value = ''
   void reload()
 }
 
@@ -171,8 +177,9 @@ async function runAction(action: string, row: Row) {
 async function reload() {
   errorMessage.value = ''
   const query = new URLSearchParams(filters.value as Record<string, string>).toString()
+  const suffix = query ? `&${query}` : ''
   try {
-    const response = await request(`${ENDPOINT}?${query}`)
+    const response = await request(`${ENDPOINT}?${batchNo.value ? `batch_no=${encodeURIComponent(batchNo.value)}${suffix}` : query}`)
     if (!response.ok) {
       throw new Error('日志条目列表读取失败')
     }

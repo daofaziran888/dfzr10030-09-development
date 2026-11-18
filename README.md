@@ -54,6 +54,7 @@ npm run dev
 | API接入管理 | `apiclient` | API客户端 | 客户端编号、接口名称、请求方法 |
 | 增量采集 | `incremental` | 增量游标 | 游标编号、来源标识、增量字段 |
 | RPA任务编排 | `robot_task` | RPA任务 | 任务编号、任务名称、页面定位器 |
+| RPA执行结果包 | `rpa_result` | 结果包 | 结果包编号、执行批次、数据版本、动作步骤、失败动作 |
 | 数据接入通道 | `ingestion` | 接入通道 | 通道编号、通道名称、输入格式 |
 | 格式解析器 | `parser` | 解析配置 | 解析编号、输入格式、输出格式 |
 | 采集结果校验 | `validator` | 校验规则 | 规则编号、校验字段、校验类型 |
@@ -73,6 +74,21 @@ npm run dev
   `backend/app/routers/<模块>.py`，业务规则在 `backend/app/services/<模块>.py`。
 - 列表接口统一返回 `{ items, total, page, size }`，动作接口统一返回 `{ ok, message }`。
 - 状态流转只允许在 `app/services` 里改，路由层不做业务判断。
+
+### RPA执行结果包（`rpa_result`）
+
+- 解析口径：按 RPA 任务动作序列与等待条件解析每个执行批次的动作输出，等待条件归并到
+  对应动作步骤；结果字段全部带 `动作步骤(action_no) + 执行批次(batch_no)` 追溯，
+  未完成步骤产出的字段标记为无效，失败动作独立入清单，不被后续成功结果覆盖。
+- 冲突取舍：同一任务多批次结果字段相同但动作完成情况不同时，支持
+  `latest_converge`（最新完成批次收敛为当前版本，前失败批次留存标注）与
+  `batch_expand`（按批次展开多版本，失败差异逐版本保留）。
+- 版本口径：`data_version` 单调递增，下游只处理 `current=true` 的当前版本
+  （`GET /api/rpa_result/tasks/{id}/current`），旧版本只读兼容。
+- 采集日志对接：`/api/log_viewer/result-packages/sync` 同步待处理清单，
+  `/check` 返回核对状态，`/consume` 消费并把差异写回 RPA 任务、为失败动作生成关联
+  任务日志；日志页可用 `batch_no` 按执行批次回查。
+- 并发恢复：任务级执行锁，重复启动返回 409；中断后 `recover` 同一时刻只放行一个任务。
 
 领域：数据工程
 子方向：数据采集、爬虫与RPA

@@ -20,12 +20,16 @@ class LogViewerService:
         filters: dict[str, str] | None = None,
         keyword: str | None = None,
         status: str | None = None,
+        batch_no: str | None = None,
         page: int = 1,
         size: int = 20,
     ) -> tuple[list[dict[str, Any]], int]:
         rows = store.rows(MODULE)
         for field, expected in (filters or {}).items():
             rows = [row for row in rows if expected.casefold() in str(row.get(field, "")).casefold()]
+        if batch_no:
+            # 按 RPA 执行批次回查关联任务日志（含结果包消费生成的失败动作日志）
+            rows = [row for row in rows if str(row.get("执行批次", "")) == str(batch_no)]
         if keyword:
             rows = [row for row in rows if keyword.casefold() in str(row.get("日志编号", "")).casefold()]
         if status:

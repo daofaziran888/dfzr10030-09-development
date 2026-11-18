@@ -68,3 +68,12 @@ def run_action(entry_id: int, payload: ActionPayload) -> ActionResult:
     if entry_or_none is None:
         return ActionResult(ok=False, message=message)
     return ActionResult(ok=True, message=message, entry=entry_or_none)
+
+
+@router.post("/recover")
+def recover_interrupted() -> ActionResult:
+    """并发恢复：仅一个中断任务被放行继续，重复恢复返回拒绝说明。"""
+    entry_or_none, message = service.recover_interrupted()
+    if entry_or_none is None:
+        return ActionResult(ok=False, message=message)
+    return ActionResult(ok=True, message=message, entry=entry_or_none)
